@@ -80,7 +80,8 @@ class RandomInclusionRVE(InclusionRVE):
     #########################
     # Initialization method #
     #########################
-    def __init__(self,inclusionSets=None,size=None,inclusionType=None,inclusionAxis=None,origin=[0,0,0],periodicityFlags=[1,1,1],domainGroup="domain",inclusionGroup="inclusions",gmshConfigChanges={}):
+    def __init__(self,inclusionSets=None,size=None,inclusionType=None,inclusionAxis=None,origin=[0,0,0],periodicityFlags=[1,1,1],domainGroup="domain", \
+        inclusionGroup="inclusions",inclusionLEGroup="inclusionLE",inclusionHEGroup="inclusionHE",gmshConfigChanges={}):
         """Initialization method for RandomInclusionRVE object instances
 
         Parameters:
@@ -144,12 +145,16 @@ class RandomInclusionRVE(InclusionRVE):
         # set attributes from input parameters
         self.domainGroup=domainGroup                                            # set group name for the domain object
         self.inclusionGroup=inclusionGroup                                      # set group name for the inclusion objects
+        self.inclusionLEGroup = inclusionLEGroup
+        self.inclusionHEGroup = inclusionHEGroup
 
         # set default placement options
         self.placementOptions={
             "maxAttempts": 10000,                                               # maximum number of attempts to place one inclusion
             "minRelDistBnd": 0.1,                                               # minimum relative (to inclusion radius) distance to the domain boundaries
             "minRelDistInc": 0.1,                                               # minimum relative (to inclusion radius) distance to other inclusions
+            "thicknessLow": 0.0,                                              # thickness of low elongation fibers
+            "thicknessDirection": 1,                                             # direction of thickness:0-x,1-y,2-z
         }
 
 
@@ -176,13 +181,18 @@ class RandomInclusionRVE(InclusionRVE):
         # generate geometry
         self.addGeometricObject(self.domainType,group=self.domainGroup,origin=self.origin,size=self.size) # add domain object to calling RVE
         self.placeInclusions(placementOptions)                                  # call internal inclusion placement routine
-        for i in range(0,np.shape(self.inclusionInfo)[0]):                      # loop over all inclusions
+        for i in range(0, np.shape(self.inclusionInfoLow)[0]):                      # loop over all inclusions
             if self.inclusionType in ["Sphere","Circle"]:
-                self.addGeometricObject(self.inclusionType,group=self.inclusionGroup,center=self.inclusionInfo[i,0:3],radius=self.inclusionInfo[i,3]) # add inclusions to calling RVE object
+                self.addGeometricObject(self.inclusionType,group=self.inclusionLEGroup,center=self.inclusionInfoLow[i,0:3],radius=self.inclusionInfoLow[i,3]) # add inclusions to calling RVE object
             elif self.inclusionType == "Cylinder":
-                self.addGeometricObject(self.inclusionType,group=self.inclusionGroup,center=self.inclusionInfo[i,0:3],radius=self.inclusionInfo[i,3],axis=self.inclusionAxis) # add inclusions to calling RVE object
-
-
+                self.addGeometricObject(self.inclusionType,group=self.inclusionLEGroup,center=self.inclusionInfoLow[i,0:3],radius=self.inclusionInfoLow[i,3],axis=self.inclusionAxis) # add inclusions to calling RVE object
+        
+        for i in range(0,np.shape(self.inclusionInfoHigh)[0]):
+            if self.inclusionType in ["Sphere","Circle"]:
+                self.addGeometricObject(self.inclusionType,group=self.inclusionHEGroup,center=self.inclusionInfoHigh[i,0:3],radius=self.inclusionInfoHigh[i,3]) # add inclusions to calling RVE object
+            elif self.inclusionType == "Cylinder":
+                self.addGeometricObject(self.inclusionType,group=self.inclusionHEGroup,center=self.inclusionInfoHigh[i,0:3],radius=self.inclusionInfoHigh[i,3],axis=self.inclusionAxis) # add inclusions to calling RVE object
+ 
     ###################################################
     # Method for the definition of boolean operations #
     ###################################################
@@ -199,15 +209,31 @@ class RandomInclusionRVE(InclusionRVE):
         self.booleanOperations=[{                                               # first boolean operation (intersect domain group and inclusions group to get rid of parts that exceed the domain boundary)
             "operation": "intersect",                                           # -> intersection of "domain" and "inclusions"
             "object": self.domainGroup,                                         # -> use "domain" group as object
-            "tool": self.inclusionGroup,                                        # -> use "inclusions" group as tool
+            "tool": self.inclusionLEGroup,                                        # -> use "inclusions" group as tool
             "removeObject": False,                                              # -> keep the object ("domain") after the boolean operation for further use
             "removeTool": True,                                                 # -> remove the tool ("inclusions") after the boolean operation
-            "resultingGroup": self.inclusionGroup                               # -> assign the result of the boolean operation to the "inclusions" group (i.e. overwrite the group) for further use
+            "resultingGroup": self.inclusionLEGroup                               # -> assign the result of the boolean operation to the "inclusions" group (i.e. overwrite the group) for further use
+        },
+        {                                                                       # first boolean operation (intersect domain group and inclusions group to get rid of parts that exceed the domain boundary)
+            "operation": "intersect",                                           # -> intersection of "domain" and "inclusions"
+            "object": self.domainGroup,                                         # -> use "domain" group as object
+            "tool": self.inclusionHEGroup,                                        # -> use "inclusions" group as tool
+            "removeObject": False,                                              # -> keep the object ("domain") after the boolean operation for further use
+            "removeTool": True,                                                 # -> remove the tool ("inclusions") after the boolean operation
+            "resultingGroup": self.inclusionHEGroup                               # -> assign the result of the boolean operation to the "inclusions" group (i.e. overwrite the group) for further use
         },
         {                                                                       # second boolean operation (cut domain with resulting inclusions to create holes within the domain where the inclusions are placed)
             "operation": "cut",                                                 # -> cut "inclusions" (updated group) from "domain"
             "object": self.domainGroup,                                         # -> use "domain" group as object
-            "tool": self.inclusionGroup,                                        # -> use "inclusions" group as tool
+            "tool": self.inclusionLEGroup,                                        # -> use "inclusions" group as tool
+            "removeObject": True,                                               # -> remove the object ("domain") after the boolean operation
+            "removeTool": False,                                                # -> keep the tool ("inclusions") after the boolean operation for further use
+            "resultingGroup": self.domainGroup                                  # -> assign the result of the boolean operation to the "domain" group (i.e. overwrite the group)
+        },
+        {                                                                       # second boolean operation (cut domain with resulting inclusions to create holes within the domain where the inclusions are placed)
+            "operation": "cut",                                                 # -> cut "inclusions" (updated group) from "domain"
+            "object": self.domainGroup,                                         # -> use "domain" group as object
+            "tool": self.inclusionHEGroup,                                        # -> use "inclusions" group as tool
             "removeObject": True,                                               # -> remove the object ("domain") after the boolean operation
             "removeTool": False,                                                # -> keep the tool ("inclusions") after the boolean operation for further use
             "resultingGroup": self.domainGroup                                  # -> assign the result of the boolean operation to the "domain" group (i.e. overwrite the group)
@@ -238,13 +264,18 @@ class RandomInclusionRVE(InclusionRVE):
         },
         {
             "dimension": self.dimension,                                        # define dimension of the physical group
-            "group": self.inclusionGroup,                                       # define name of the physical group
+            "group": self.inclusionLEGroup,                                       # define name of the physical group
             "physicalNumber": 2                                                 # set physical number of the physical group
+        },
+        {
+            "dimension": self.dimension,                                      # define dimension of the physical group
+            "group": self.inclusionHEGroup,                                                # define name of the physical group
+            "physicalNumber": 3                                                # set physical number of the physical group
         },
         {
             "dimension": self.dimension-1,                                      # define dimension of the physical group
             "group": "boundary",                                                # define name of the physical group
-            "physicalNumber": 3,                                                # set physical number of the physical group
+            "physicalNumber": 4                                                # set physical number of the physical group
         }]
 
 
@@ -302,6 +333,10 @@ class RandomInclusionRVE(InclusionRVE):
         # loop over all incSets
         relevantAxesFlags=np.zeros((3,))                                        # creaty auxiliary flag variable to indicate axes which are relevant for inclusion center calculation
         relevantAxesFlags[self.relevantAxes]=1                                  # set relevantAxesFlags to 1 for the relevant axes
+        
+        thickness = placementOptions["thicknessLow"]
+        idirection = placementOptions["thicknessDirection"]               # 0-x,1-y,2-z
+
         for iSet in range(0,np.shape(rSets)[0]):
 
             # initialization:
@@ -310,9 +345,23 @@ class RandomInclusionRVE(InclusionRVE):
 
             # try to place all inclusions for the current set
             while placedIncsForSet < nSets[iSet] and nAttempts < placementOptions["maxAttempts"]:
+                if iSet == 0:
+                    if idirection == 0:
+                        rand_xyz = np.array([np.random.uniform(thickness,self.size[0]), np.random.uniform(0,self.size[1]), np.random.uniform(0,self.size[2])])
+                    elif idirection == 1:
+                        rand_xyz = np.array([np.random.uniform(0,self.size[0]), np.random.uniform(thickness,self.size[1]), np.random.uniform(0,self.size[2])])
+                    else:
+                        rand_xyz = np.array([np.random.uniform(0,self.size[0]), np.random.uniform(0,self.size[1]), np.random.uniform(thickness,self.size[2])])                      
+                else:
+                    if idirection == 0:
+                        rand_xyz = np.array([np.random.uniform(0,thickness), np.random.uniform(0,self.size[1]), np.random.uniform(0,self.size[2])])
+                    elif idirection == 1:
+                        rand_xyz = np.array([np.random.uniform(0,self.size[0]), np.random.uniform(0,thickness), np.random.uniform(0,self.size[2])])
+                    else:
+                        rand_xyz = np.array([np.random.uniform(0,self.size[0]), np.random.uniform(0,self.size[1]), np.random.uniform(0,thickness)])
 
                 # calculate random coordinates for current inclusion (ensure 2D array for proper handling)
-                thisIncInfo=np.atleast_2d(np.r_[np.random.rand(3)*self.size*relevantAxesFlags, rSets[iSet], distBndSets[iSet], distIncSets[iSet]])
+                thisIncInfo=np.atleast_2d(np.r_[rand_xyz*relevantAxesFlags, rSets[iSet], distBndSets[iSet], distIncSets[iSet]])
 
                 # check inclusion distance to boundaries
                 acceptInc, distBnd = self._checkBndDistance(thisIncInfo[0,:],self.relevantAxes)
@@ -339,7 +388,7 @@ class RandomInclusionRVE(InclusionRVE):
                     if acceptInc == False:                                      # start with next attempt, if inclusion is not accepted
                         nAttempts+=1
                         if nAttempts == placementOptions["maxAttempts"]:        # user info, if not all inclusions of the current set could be placed
-                            print("Could not place all inclusions for the current set. For r={0:.2f}, {1:.0f}/{2:.0f} have been placed.".format(rSets[iSet],placedIncsForSet,nSets[iSet]))
+                            print("Could not place all inclusions for the current set. For r={0:.8f}, {1:.0f}/{2:.0f} have been placed.".format(rSets[iSet],placedIncsForSet,nSets[iSet]))
                         continue
                     else:                                                       # update incInfo and number of set inclusions/inclusion instances
                         incInfo[totalInstancesSet:totalInstancesSet+thisIncInstances,:]=thisIncInfo
@@ -357,8 +406,27 @@ class RandomInclusionRVE(InclusionRVE):
         incInfo[:,0:3]=incInfo[:,0:3]+np.atleast_2d(self.origin)                # translate center coordinates to match with defined origin of the RVE domain
         incInfo=incInfo[0:totalInstancesSet,0:4]                                # incInfo=[M_x, M_y, M_z, R] with M: center points, R: radii
 
+        # classify fibers due to thickness and coordinates
+        incInfoLow = []  
+        incInfoHigh = [] 
+        nLow = 0
+        nHigh = 0
+        for ifiber in range(0,totalInstancesSet):
+            if incInfo[ifiber,idirection]<=thickness:               # center coordinate might be less then 0, because of cutting
+                incInfoLow.append(incInfo[ifiber,0:4])
+                nLow+=1
+            else:
+                incInfoHigh.append(incInfo[ifiber,0:4])
+                nHigh+=1
+        incInfoLow = np.delete(incInfoLow, slice(nLow,-1), axis=0)    
+        incInfoHigh = np.delete(incInfoHigh, slice(nHigh,-1), axis=0)      
+        if nLow+nHigh != totalInstancesSet:
+            raise TypeError("Something is wrong when classifying low and high elonggation fibers, check RandomInclusionRVE.py!")
+
         # save relevant results in randomInclusions object
         self.inclusionInfo=incInfo
+        self.inclusionInfoLow=incInfoLow
+        self.inclusionInfoHigh=incInfoHigh
 
 
     #######################################################
